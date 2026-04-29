@@ -93,10 +93,10 @@ export default function Dashboard() {
   const dataSource = botState.data?.dataSource;
   const lastPrice = ticker.data?.last;
 
-  // Build equity curve from real ticker data if available, else mock
+  // Build equity curve from real ticker data if available, else mock (deterministic)
   const equityData = Array.from({ length: 30 }, (_, i) => ({
     time: `${i + 1}d`,
-    equity: 100000 + Math.sin(i / 5) * 2000 + Math.random() * 1000,
+    equity: 100000 + Math.sin(i / 5) * 2000 + Math.sin(i * 123) * 500,
   }));
 
   const fngColor = fearGreedScore === undefined ? "#6b7280"

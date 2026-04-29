@@ -118,7 +118,7 @@ export default function Terminal() {
               <div className="space-y-1">
                 {[0.001, 0.002, 0.003, 0.004, 0.005].map((offset, i) => {
                   const price = latest.close * (1 - offset);
-                  const size = 0.5 + Math.random() * 2;
+                  const size = 0.5 + Math.sin(i * 456) * 1 + 1; // deterministic mock
                   return (
                     <div key={i} className="flex items-center justify-between py-1 px-2 rounded hover:bg-red-500/5">
                       <span className="text-sm text-red-400">{price.toFixed(2)}</span>
@@ -146,7 +146,7 @@ export default function Terminal() {
               <div className="space-y-1">
                 {[0.001, 0.002, 0.003, 0.004, 0.005].map((offset, i) => {
                   const price = latest.close * (1 + offset);
-                  const size = 0.5 + Math.random() * 2;
+                  const size = 0.5 + Math.sin(i * 789) * 1 + 1; // deterministic mock
                   return (
                     <div key={i} className="flex items-center justify-between py-1 px-2 rounded hover:bg-emerald-500/5">
                       <span className="text-sm text-emerald-400">{price.toFixed(2)}</span>

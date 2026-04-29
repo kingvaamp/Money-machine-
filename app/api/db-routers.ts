@@ -1,15 +1,66 @@
 import { z } from "zod";
 import { createRouter, publicQuery } from "./middleware";
 
+interface Strategy {
+  id: number;
+  userId: number;
+  name: string;
+  type: string;
+  symbol: string;
+  timeframe: string;
+  parameters: Record<string, unknown>;
+  isActive: boolean;
+  weight?: number | string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+interface Backtest {
+  id: number;
+  userId?: number;
+  strategyId?: number;
+  symbol: string;
+  startDate: string | Date;
+  endDate: string | Date;
+  initialCapital: number | string;
+  finalCapital: number | string;
+  totalReturn: number | string;
+  maxDrawdown: number | string;
+  winRate: number | string;
+  trades?: number;
+  sharpeRatio?: number | string;
+  avgTradeReturn?: number | string;
+  equityCurve?: number[];
+  createdAt?: Date;
+}
+
+interface Signal {
+  id: number;
+  strategyId: number;
+  type: string;
+  symbol: string;
+  price: number;
+  confidence: number;
+  timestamp: Date;
+  createdAt?: Date;
+}
+
+interface MarketData {
+  symbol: string;
+  price: number;
+  timestamp: Date;
+  timeframe?: string;
+}
+
 // --- In-Memory Stores ---
-let localStrategies: any[] = [];
+let localStrategies: Strategy[] = [];
 let strategyIdCounter = 1;
 
-let localBacktests: any[] = [];
+let localBacktests: Backtest[] = [];
 let backtestIdCounter = 1;
 
-let localSignals: any[] = [];
-let localMarketData: any[] = [];
+const localSignals: Signal[] = [];
+const localMarketData: MarketData[] = [];
 // ------------------------
 
 export const strategyRouter = createRouter({
@@ -87,7 +138,7 @@ export const strategyRouter = createRouter({
 export const backtestRouter = createRouter({
   list: publicQuery.query(async () => {
     return localBacktests
-      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+      .sort((a, b) => (b.createdAt?.getTime() || 0) - (a.createdAt?.getTime() || 0))
       .slice(0, 50);
   }),
 
@@ -145,7 +196,7 @@ export const backtestRouter = createRouter({
 export const signalRouter = createRouter({
   list: publicQuery.query(async () => {
     return localSignals
-      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+      .sort((a, b) => (b.createdAt?.getTime() || 0) - (a.createdAt?.getTime() || 0))
       .slice(0, 100);
   }),
 
@@ -157,7 +208,7 @@ export const signalRouter = createRouter({
         res = res.filter((s) => s.strategyId === input.strategyId);
       }
       return res
-        .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+        .sort((a, b) => (b.createdAt?.getTime() || 0) - (a.createdAt?.getTime() || 0))
         .slice(0, input.limit);
     }),
 });

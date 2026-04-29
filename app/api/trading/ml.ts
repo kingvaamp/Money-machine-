@@ -274,7 +274,8 @@ export class EnsembleStrategy {
   generateEnsembleSignals(
     data: OHLCV[],
     strategies: StrategyConfig[],
-    _useML: boolean = true,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    _useML: boolean = true, // Placeholder for trained model integration
     usePPORL: boolean = true,
     useSentiment: boolean = true  // Now ON by default — real API available
   ): {
