@@ -40,20 +40,23 @@ export interface Balance {
 }
 
 export class OrderExecutor {
-  private exchange: ccxt.binance | null = null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private exchange: any = null;
   private mode: ExecutionMode;
 
   constructor(mode: ExecutionMode = "simulation") {
     this.mode = mode;
 
     if (mode !== "simulation") {
-      const config: ConstructorParameters<typeof ccxt.binance>[0] = {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const config: Record<string, any> = {
         apiKey: env.binanceApiKey,
         secret: env.binanceApiSecret,
         enableRateLimit: true,
         options: { defaultType: "spot" },
       };
-      this.exchange = new ccxt.binance(config);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      this.exchange = new (ccxt as any).binance(config);
 
       if (env.binanceTestnet) {
         this.exchange.setSandboxMode(true);
@@ -143,7 +146,8 @@ export class OrderExecutor {
     if (this.mode === "simulation" || !this.exchange) return [];
     try {
       const orders = await this.exchange.fetchOpenOrders(symbol);
-      return orders.map((o) => ({
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return orders.map((o: any) => ({
         id: String(o.id),
         symbol: o.symbol,
         side: o.side as "buy" | "sell",

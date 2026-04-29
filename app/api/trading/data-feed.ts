@@ -8,11 +8,14 @@
  * - Falls back to REST polling if WebSocket is unavailable
  */
 
-import ccxt, { type OHLCV as CCXTOHLCV } from "ccxt";
+import ccxt from "ccxt";
 import type { OHLCV } from "./types";
 import { env } from "../lib/env";
 
 const CANDLE_BUFFER_SIZE = 500;
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type CCXTOHLCV = any;
 
 // Convert CCXT OHLCV tuple [timestamp, open, high, low, close, volume] to our type
 function fromCCXT(raw: CCXTOHLCV): OHLCV {
@@ -27,13 +30,15 @@ function fromCCXT(raw: CCXTOHLCV): OHLCV {
 }
 
 export class LiveDataFeed {
-  private exchange: ccxt.pro.binance;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private exchange: any;
   private buffers: Map<string, OHLCV[]> = new Map();
   private watching: Set<string> = new Set();
   private listeners: Map<string, Array<(candles: OHLCV[]) => void>> = new Map();
 
   constructor() {
-    const config: ccxt.Exchange["options"] & Record<string, unknown> = {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const config: Record<string, any> = {
       apiKey: env.binanceApiKey,
       secret: env.binanceApiSecret,
       enableRateLimit: true,
@@ -43,13 +48,14 @@ export class LiveDataFeed {
     };
 
     if (env.binanceTestnet) {
-      (config as Record<string, unknown>)["options"] = {
-        ...(config as Record<string, unknown>)["options"] as object,
+      config["options"] = {
+        ...config["options"] as object,
         testnet: true,
       };
     }
 
-    this.exchange = new ccxt.pro.binance(config);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    this.exchange = new (ccxt as any).binance(config);
 
     if (env.binanceTestnet) {
       this.exchange.setSandboxMode(true);
@@ -113,7 +119,8 @@ export class LiveDataFeed {
   private async watchLoop(symbol: string, timeframe: string, k: string): Promise<void> {
     while (this.watching.has(k)) {
       try {
-        const rawCandles = await (this.exchange as ccxt.pro.Exchange).watchOHLCV(symbol, timeframe);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const rawCandles = await (this.exchange as any).watchOHLCV(symbol, timeframe);
         const newCandles = rawCandles.map(fromCCXT);
 
         // Merge into buffer

@@ -351,12 +351,19 @@ export class EnsembleStrategy {
     const filteredSignals = weightedSignals.filter((s) => s.confidence > 0.5);
     filteredSignals.sort((a, b) => b.confidence - a.confidence);
 
+    // Sentiment label based on cached score (set by refreshSentiment in engine)
+    const sentimentLabel = this.lastFearGreedScore <= 25 ? "Extreme Fear" 
+      : this.lastFearGreedScore <= 45 ? "Fear"
+      : this.lastFearGreedScore <= 55 ? "Neutral"
+      : this.lastFearGreedScore <= 75 ? "Greed"
+      : "Extreme Greed";
+
     return {
       signals: filteredSignals,
       regime,
       allocations,
       sentiment: useSentiment
-        ? { score: this.lastFearGreedScore, label: this.fearGreed["cache"]?.label ?? "Neutral" }
+        ? { score: this.lastFearGreedScore, label: sentimentLabel }
         : undefined,
     };
   }

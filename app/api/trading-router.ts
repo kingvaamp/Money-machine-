@@ -100,6 +100,10 @@ export const tradingRouter = createRouter({
         hurstExponent: 0.5,
       },
       lastUpdate: Date.now(),
+      fearGreedScore: 50,
+      fearGreedLabel: "Neutral",
+      activeSymbols: [] as string[],
+      dataSource: "synthetic" as const,
     };
     return engine.getState();
   }),

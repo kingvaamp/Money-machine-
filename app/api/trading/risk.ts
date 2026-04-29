@@ -131,14 +131,15 @@ export class RiskManager {
   checkEntry(
     price: number,
     side: "buy" | "sell",
-    proposedSize: number,
+    _proposedSize: number,
     data: OHLCV[],
     existingPositions: Position[],
     signalConfidence: number = 0.6
   ): RiskCheck {
     // Pause check (after consecutive losses)
     if (this.isPaused()) {
-      return { allowed: false, reason: `Trading paused due to consecutive losses. Resumes at ${new Date(this.state.pauseUntil).toLocaleTimeString()}` };
+      const pauseTime = this.state.pauseUntil ? new Date(this.state.pauseUntil).toLocaleTimeString() : "shortly";
+      return { allowed: false, reason: `Trading paused due to consecutive losses. Resumes at ${pauseTime}` };
     }
 
     // Circuit breaker check
@@ -216,7 +217,6 @@ export class RiskManager {
         : ((position.avgEntryPrice - currentPrice) / position.avgEntryPrice) * 100;
 
     const entryPrice = position.avgEntryPrice;
-    const riskAmount = Math.abs(currentPrice - entryPrice) * position.quantity;
     const initialRisk = Math.abs((position.stopLoss || entryPrice) - entryPrice) * position.quantity;
     const rMultiple = initialRisk > 0 ? (unrealizedPnlPercent * position.quantity) / (initialRisk / position.quantity) : 0;
 
@@ -249,12 +249,12 @@ export class RiskManager {
       }
     }
 
-    // Trailing stop: when profit reaches 2R, trail with ATR
+    // Trailing stop: when profit reaches 2R, trail with 2% trailing distance
     if (rMultiple >= 2) {
-      const atrMultiplier = position.side === "long" ? 1.5 : 1.5;
+      const trailingDistance = 0.02; // 2% trailing stop
       const newTrailingStop = position.side === "long"
-        ? currentPrice - (currentPrice * 0.02)
-        : currentPrice + (currentPrice * 0.02);
+        ? currentPrice - (currentPrice * trailingDistance)
+        : currentPrice + (currentPrice * trailingDistance);
       
       const currentTrailingStop = position.trailingStop || (position.side === "long" ? entryPrice : entryPrice);
       const updatedTrailingStop = position.side === "long"

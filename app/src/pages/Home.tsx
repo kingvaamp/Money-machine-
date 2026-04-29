@@ -87,10 +87,10 @@ export default function Dashboard() {
   const latestSignals = signals.data?.slice(-5) || [];
   const latestTrades = trades.data?.slice(-5) || [];
   const openPositions = positions.data || [];
-  const hurstExponent = (botState.data?.regime as Record<string, unknown>)?.hurstExponent as number | undefined;
-  const fearGreedScore = botState.data?.fearGreedScore as number | undefined;
-  const fearGreedLabel = botState.data?.fearGreedLabel as string | undefined;
-  const dataSource = (botState.data as Record<string, unknown>)?.dataSource as string | undefined;
+  const hurstExponent = botState.data?.regime?.hurstExponent;
+  const fearGreedScore = botState.data?.fearGreedScore;
+  const fearGreedLabel = botState.data?.fearGreedLabel;
+  const dataSource = botState.data?.dataSource;
   const lastPrice = ticker.data?.last;
 
   // Build equity curve from real ticker data if available, else mock
