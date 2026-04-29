@@ -86,9 +86,16 @@ interface BotState {
 }
 ```
 
+**Implemented Enhancements** (April 2026):
+- ✅ Confidence-based position sizing (0.5-2% risk based on signal quality)
+- ✅ Weekly loss limit circuit breaker (10%)
+- ✅ Consecutive loss limit (pause after 5 losses)
+- ✅ Breakeven move (move stop to entry at 1R profit)
+- ✅ Trailing stop (2% trailing at 2R profit)
+- ✅ Peak equity tracking for accurate drawdown calculation
+- ✅ Pause mechanism with 1-hour cooldown after consecutive losses
+
 **Current Limitations**:
-- No dynamic position sizing based on signal confidence
-- Limited multi-symbol support (single symbol processing)
 - No built-in walk-forward validation for strategies
 
 ---
@@ -137,11 +144,13 @@ interface BotState {
 
 ### 3. Risk Management (`api/trading/risk.ts`)
 
-**Implemented Components**:
+**Implemented Components** (Updated April 2026):
 
 #### RiskManager Class
 - **Position Sizing**:
-  - Kelly Criterion (half-Kelly for safety)
+  - ✅ Confidence-based sizing (high=2%, medium=1%, low=0.5%)
+  - ✅ Kelly Criterion (half-Kelly for safety)
+  - ✅ ATR-based stop distance (2 ATR for SL)
   - ATR-based position sizing with 2 ATR stop distance
   - Maximum position size enforcement (config.maxPositionSize)
 
@@ -865,6 +874,29 @@ Where:
 
 Fractional Kelly = Kelly % × 0.5 (for safety)
 ```
+
+---
+
+## Changelog
+
+### Version 1.1 - April 2026 (Risk Management Update)
+**Risk Management Enhancements**:
+- ✅ Added weekly loss limit circuit breaker (10% threshold)
+- ✅ Added consecutive loss limit - pause trading after 5 consecutive losses (1-hour cooldown)
+- ✅ Implemented confidence-based position sizing (0.5% for low, 1% for medium, 2% for high confidence signals)
+- ✅ Added breakeven move - moves stop loss to entry price when profit reaches 1R
+- ✅ Added trailing stop - 2% trailing stop when profit reaches 2R
+- ✅ Added peak equity tracking for accurate drawdown calculation from all-time high
+- ✅ Added trading pause mechanism with automatic resume
+
+**Bug Fixes**:
+- ✅ Fixed ccxt type imports in data-feed.ts and executor.ts
+- ✅ Fixed FearGreedSentiment cache reference in ml.ts
+- ✅ Fixed BotState fallback in trading-router.ts
+- ✅ Fixed type casting in Home.tsx
+- ✅ Removed unused variables (proposedSize, riskAmount, atrMultiplier)
+
+**Status**: All TypeScript checks passing ✓
 
 ---
 
