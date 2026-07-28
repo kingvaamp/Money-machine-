@@ -20,6 +20,24 @@ import {
 } from "recharts";
 import { BarChart3, Play, Clock, TrendingUp } from "lucide-react";
 
+interface BacktestResult {
+  totalReturn: number;
+  sharpeRatio: number;
+  maxDrawdown: number;
+  winRate: number;
+  totalTrades: number;
+  volatility: number;
+  equityCurve: { equity: number }[];
+  trades: {
+    pnl: number;
+    side: string;
+    entryPrice: number;
+    exitPrice?: number | null;
+    pnlPercent: number;
+    exitReason?: string;
+  }[];
+}
+
 export default function Backtest() {
   const [params, setParams] = useState({
     symbol: "BTCUSDT",
@@ -27,12 +45,17 @@ export default function Backtest() {
     useML: true,
     usePPORL: true,
   });
-  const [result, setResult] = useState<any>(null);
+  const [result, setResult] = useState<BacktestResult | null>(null);
   const [isRunning, setIsRunning] = useState(false);
 
   const backtestMutation = trpc.trading.runBacktest.useMutation({
     onSuccess: (data) => {
-      setResult(data);
+      if ('error' in data) {
+        console.error("Backtest failed:", data.error);
+        setResult(null);
+      } else {
+        setResult(data as BacktestResult);
+      }
       setIsRunning(false);
     },
     onError: () => setIsRunning(false),
@@ -43,12 +66,12 @@ export default function Backtest() {
     backtestMutation.mutate(params);
   };
 
-  const equityData = result?.equityCurve?.map((e: any, i: number) => ({
+  const equityData = result?.equityCurve?.map((e: { equity: number }, i: number) => ({
     day: i,
     equity: e.equity,
   })) || [];
 
-  const tradeData = result?.trades?.map((t: any, i: number) => ({
+  const tradeData = result?.trades?.map((t: { pnl: number }, i: number) => ({
     index: i,
     pnl: t.pnl,
   })) || [];
@@ -203,7 +226,7 @@ export default function Backtest() {
                       labelStyle={{ color: "#94a3b8" }}
                     />
                     <Bar dataKey="pnl">
-                      {tradeData.slice(0, 50).map((_: any, i: number) => (
+                      {tradeData.slice(0, 50).map((_, i) => (
                         <Cell key={i} fill={_.pnl >= 0 ? "#10b981" : "#ef4444"} />
                       ))}
                     </Bar>
@@ -232,7 +255,7 @@ export default function Backtest() {
                     </tr>
                   </thead>
                   <tbody>
-                    {result.trades?.slice(0, 20).map((trade: any, i: number) => (
+                    {result.trades?.slice(0, 20).map((trade, i) => (
                       <tr key={i} className="border-b border-slate-800/50">
                         <td className="py-2">
                           <Badge variant="outline" className={trade.side === "buy" ? "border-emerald-500 text-emerald-400" : "border-red-500 text-red-400"}>

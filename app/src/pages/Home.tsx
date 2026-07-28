@@ -82,6 +82,7 @@ export default function Dashboard() {
       }, 3000);
     }
     return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isRunning, symbol]);
 
   const latestSignals = signals.data?.slice(-5) || [];

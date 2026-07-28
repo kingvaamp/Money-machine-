@@ -45,3 +45,6 @@ Icon
 
 # Money-machine subfolder (empty clone)
 Money-machine-/
+# Python
+__pycache__/
+lint_output.txt

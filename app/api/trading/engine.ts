@@ -1,6 +1,6 @@
 import type { OHLCV, StrategyConfig, RiskConfig, TradeSignal, MarketRegime, Position, BacktestResult } from "./types";
 import { generateSyntheticData } from "./types";
-import { EnsembleStrategy } from "./ml";
+import { EnsembleStrategy, MLModelClient } from "./ml";
 import { RiskManager, CircuitBreaker } from "./risk";
 import { BacktestEngine } from "./backtest";
 import { liveDataFeed } from "./data-feed";
@@ -45,6 +45,7 @@ export class TradingEngine {
   }> = [];
 
   private executor: OrderExecutor;
+  private mlClient: MLModelClient;
 
   constructor(config: RiskConfig) {
     this.state = {
@@ -73,6 +74,7 @@ export class TradingEngine {
     this.ensemble = new EnsembleStrategy();
     this.backtestEngine = new BacktestEngine();
     this.executor = new OrderExecutor("simulation");
+    this.mlClient = new MLModelClient();
   }
 
   /**
@@ -159,13 +161,18 @@ export class TradingEngine {
     this.state.fearGreedScore = fearGreed.score;
     this.state.fearGreedLabel = fearGreed.label;
 
-    // Update regime + generate signals (with real sentiment)
+    // Fetch ML prediction (cached 1 min; gracefully offline)
+    const mlPrediction = await this.mlClient.predict(data).catch(() => null);
+    this.ensemble.setMLPrediction(mlPrediction);
+
+    // Update regime + generate signals (with real sentiment + real trade history)
     const ensembleResult = this.ensemble.generateEnsembleSignals(
       data,
       this.strategies,
       true,  // useML
       true,  // usePPORL
-      true   // useSentiment — real Fear & Greed
+      true,  // useSentiment
+      this.tradeHistory  // Real win rates for PPO
     );
     this.state.regime = ensembleResult.regime;
 
@@ -239,6 +246,14 @@ export class TradingEngine {
       );
 
       if (check.allowed && check.adjustedSize) {
+        // Dynamic TP/SL by Hurst regime
+        const H = ensembleResult.regime.hurstExponent ?? 0.5;
+        const atrMultiplierTP = H > 0.6 ? 5 : H < 0.4 ? 1.5 : 3; // Trending: let run; Ranging: take fast
+        const adjustedTakeProfit = check.stopLoss && check.takeProfit
+          ? signal.side === "buy"
+            ? currentPrice + Math.abs(currentPrice - check.stopLoss) * atrMultiplierTP
+            : currentPrice - Math.abs(check.stopLoss - currentPrice) * atrMultiplierTP
+          : check.takeProfit;
         // Execute via OrderExecutor (paper: real Binance testnet, simulation: in-memory)
         const orderResult = await this.executor.placeMarketOrder(
           symbol, signal.side, check.adjustedSize, currentPrice
@@ -260,7 +275,7 @@ export class TradingEngine {
           leverage: 1,
           openedAt: new Date(),
           stopLoss: check.stopLoss,
-          takeProfit: check.takeProfit,
+          takeProfit: adjustedTakeProfit,
           stopLossMoved: false,
         };
         this.positions.push(position);

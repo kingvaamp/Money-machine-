@@ -104,7 +104,7 @@ export default function Strategies() {
                 </div>
                 <div>
                   <Label className="text-slate-300">Strategy Type</Label>
-                  <Select value={newStrategy.type} onValueChange={(v) => setNewStrategy({ ...newStrategy, type: v as any })}>
+                  <Select value={newStrategy.type} onValueChange={(v) => setNewStrategy({ ...newStrategy, type: v as typeof newStrategy.type })}>
                     <SelectTrigger className="bg-slate-800 border-slate-700 text-white mt-1">
                       <SelectValue />
                     </SelectTrigger>

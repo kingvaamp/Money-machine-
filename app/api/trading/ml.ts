@@ -12,6 +12,98 @@ import {
 import { getStrategyByType } from "./strategies";
 import { FearGreedSentiment } from "./sentiment";
 
+// ─── ML Model Client ──────────────────────────────────────────────────────────
+// Connects to the Python FastAPI model server (data-pipeline/model_server.py).
+// Gracefully degrades if the server is offline — bot continues rule-based.
+
+export interface MLPrediction {
+  prediction: "UP" | "DOWN";
+  confidence: number;     // 0.5–1.0 calibrated probability
+  strongSignal: boolean;  // confidence > 0.72
+  sitOut: boolean;        // true when model is uncertain (skip trading)
+  online: boolean;        // false if server unreachable
+}
+
+export class MLModelClient {
+  private baseUrl: string;
+  private timeoutMs: number;
+  private lastPrediction: MLPrediction | null = null;
+  private lastPredictionTime: number = 0;
+  private cacheTtlMs: number = 60_000; // Cache predictions for 1 minute
+
+  constructor(baseUrl = "http://127.0.0.1:8000", timeoutMs = 3000) {
+    this.baseUrl = baseUrl;
+    this.timeoutMs = timeoutMs;
+  }
+
+  /**
+   * Fetch a prediction from the Python ML server.
+   * Returns a cached result if within TTL to avoid hammering the server.
+   * Returns offline fallback if server is unreachable.
+   */
+  async predict(candles: OHLCV[]): Promise<MLPrediction> {
+    const now = Date.now();
+
+    // Serve from cache within TTL
+    if (this.lastPrediction && now - this.lastPredictionTime < this.cacheTtlMs) {
+      return this.lastPrediction;
+    }
+
+    // Need at least 250 candles for feature engineering
+    if (candles.length < 250) {
+      return { prediction: "UP", confidence: 0.5, strongSignal: false, sitOut: true, online: false };
+    }
+
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+
+      const response = await fetch(`${this.baseUrl}/predict`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          candles: candles.slice(-500).map((c) => ({
+            timestamp: c.timestamp,
+            open: c.open,
+            high: c.high,
+            low: c.low,
+            close: c.close,
+            volume: c.volume,
+          })),
+        }),
+        signal: controller.signal,
+      });
+
+      clearTimeout(timer);
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const data = await response.json() as {
+        prediction: "UP" | "DOWN";
+        confidence: number;
+        strong_signal: boolean;
+        sit_out: boolean;
+      };
+
+      this.lastPrediction = {
+        prediction: data.prediction,
+        confidence: data.confidence,
+        strongSignal: data.strong_signal,
+        sitOut: data.sit_out,
+        online: true,
+      };
+      this.lastPredictionTime = now;
+      return this.lastPrediction;
+
+    } catch {
+      // Server offline — degrade gracefully, do not crash the engine
+      return { prediction: "UP", confidence: 0.5, strongSignal: false, sitOut: true, online: false };
+    }
+  }
+}
+
 /**
  * Upgraded RegimeClassifier — uses the Hurst Exponent (R/S analysis)
  * as the primary regime detector, validated by EMAs and ATR.
@@ -252,11 +344,14 @@ export class PPORLOptimizer {
   }
 }
 
-// Ensemble strategy combiner — now uses real Fear & Greed sentiment
+// Ensemble strategy combiner — real ML gating + real PPO win rates
 export class EnsembleStrategy {
   private regimeClassifier = new RegimeClassifier();
   private ppoOptimizer = new PPORLOptimizer();
   private fearGreed = new FearGreedSentiment();
+
+  // Injected by the engine on each tick with real trade history
+  private mlPrediction: MLPrediction | null = null;
 
   // Cached sentiment — fetched async before each tick, stored here
   private lastFearGreedScore: number = 50;
@@ -271,20 +366,101 @@ export class EnsembleStrategy {
     return data;
   }
 
+  /**
+   * Inject the latest ML prediction from the Python model server.
+   * Called by TradingEngine.tick() before generateEnsembleSignals().
+   */
+  setMLPrediction(prediction: MLPrediction | null) {
+    this.mlPrediction = prediction;
+  }
+
+  /**
+   * Build real per-strategy performance from actual closed trade history.
+   * FIX: Replaces the Math.random() win rate placeholder.
+   */
+  private buildRealPerformance(
+    strategies: StrategyConfig[],
+    tradeHistory: Array<{ side: "buy" | "sell"; pnl: number; strategy?: string }>,
+    data: OHLCV[]
+  ): Record<string, { returns: number[]; drawdowns: number[]; winRate: number }> {
+    const perf: Record<string, { returns: number[]; drawdowns: number[]; winRate: number }> = {};
+
+    for (const config of strategies) {
+      if (!config.isActive) continue;
+
+      // Filter the last 50 closed trades for this strategy type
+      const stratTrades = tradeHistory
+        .filter((t) => !t.strategy || t.strategy.toLowerCase().replace(/\s+/g, "_") === config.type)
+        .slice(-50);
+
+      if (stratTrades.length >= 5) {
+        // Real win rate from actual trades
+        const wins = stratTrades.filter((t) => t.pnl > 0).length;
+        const realWinRate = wins / stratTrades.length;
+        const returns = stratTrades.map((t) => t.pnl > 0 ? 0.01 : -0.005); // Simplified return proxy
+        const drawdowns = returns.filter((r) => r < 0).map((r) => Math.abs(r));
+        perf[config.type] = { returns, drawdowns, winRate: realWinRate };
+      } else {
+        // Not enough real data yet — use market returns (neutral)
+        const marketReturns = data.slice(-30).map((d, i) => {
+          if (i === 0) return 0;
+          return (d.close - data[data.length - 30 + i - 1].close) / (data[data.length - 30 + i - 1].close || 1);
+        });
+        perf[config.type] = {
+          returns: marketReturns,
+          drawdowns: marketReturns.filter((r) => r < 0).map((r) => Math.abs(r)),
+          winRate: 0.50, // Neutral default — not random
+        };
+      }
+    }
+    return perf;
+  }
+
   generateEnsembleSignals(
     data: OHLCV[],
     strategies: StrategyConfig[],
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    _useML: boolean = true, // Placeholder for trained model integration
+    useML: boolean = true,
     usePPORL: boolean = true,
-    useSentiment: boolean = true  // Now ON by default — real API available
+    useSentiment: boolean = true,
+    tradeHistory: Array<{ side: "buy" | "sell"; pnl: number; strategy?: string }> = []
   ): {
     signals: TradeSignal[];
     regime: MarketRegime & { hurstExponent: number };
     allocations: Record<string, number>;
     sentiment?: { score: number; label: string };
+    mlPrediction?: MLPrediction;
   } {
     const regime = this.regimeClassifier.classify(data);
+
+    // ── ML GATE (Problem 1 Fix) ────────────────────────────────────────────
+    // If ML model is online and says sit out → return empty signals immediately.
+    // This is the core profitability gate: don't trade when uncertain.
+    const ml = useML ? this.mlPrediction : null;
+    if (ml?.online && ml.sitOut) {
+      return {
+        signals: [],
+        regime,
+        allocations: {},
+        sentiment: useSentiment
+          ? { score: this.lastFearGreedScore, label: this._sentimentLabel() }
+          : undefined,
+        mlPrediction: ml,
+      };
+    }
+
+    // ── Hurst Dead Zone: H ∈ [0.47, 0.53] → skip all entries ─────────────
+    if (regime.hurstExponent >= 0.47 && regime.hurstExponent <= 0.53) {
+      return {
+        signals: [],
+        regime,
+        allocations: {},
+        sentiment: useSentiment
+          ? { score: this.lastFearGreedScore, label: this._sentimentLabel() }
+          : undefined,
+        mlPrediction: ml ?? undefined,
+      };
+    }
+
     const allSignals: TradeSignal[] = [];
 
     // Generate signals from each strategy
@@ -295,22 +471,9 @@ export class EnsembleStrategy {
       allSignals.push(...signals);
     }
 
-    // Calculate recent performance for PPO
-    const recentPerformance: Record<string, { returns: number[]; drawdowns: number[]; winRate: number }> = {};
-    for (const config of strategies) {
-      if (!config.isActive) continue;
-      const returns = data.slice(-30).map((d, i) => {
-        if (i === 0) return 0;
-        return (d.close - data[data.length - 30 + i - 1].close) / data[data.length - 30 + i - 1].close;
-      });
-      recentPerformance[config.type] = {
-        returns,
-        drawdowns: returns.filter((r) => r < 0).map((r) => Math.abs(r)),
-        winRate: 0.5 + Math.random() * 0.2,
-      };
-    }
+    // ── PPO with Real Win Rates (Problem 2 Fix) ───────────────────────────
+    const recentPerformance = this.buildRealPerformance(strategies, tradeHistory, data);
 
-    // Get strategy allocations from PPO
     let allocations: Record<string, number> = {};
     if (usePPORL) {
       const action = this.ppoOptimizer.selectAction(regime, strategies, recentPerformance);
@@ -321,7 +484,7 @@ export class EnsembleStrategy {
       for (const s of active) allocations[s.type] = equalWeight;
     }
 
-    // Weight signals by: strategy allocation × regime match × Hurst confidence × sentiment
+    // ── Weight signals ────────────────────────────────────────────────────
     const weightedSignals = allSignals.map((signal) => {
       const strategyWeight = allocations[signal.strategy.toLowerCase().replace(/\s+/g, "_")] || 0.2;
       const regimeMatch = this.regimeClassifier
@@ -329,43 +492,60 @@ export class EnsembleStrategy {
         .includes(signal.strategy.toLowerCase().replace(/\s+/g, "_"));
       const regimeBoost = regimeMatch ? 0.2 : -0.1;
 
-      // Sentiment boost from real Fear & Greed Index
+      // Fear & Greed sentiment boost
       let sentimentBoost = 0;
       if (useSentiment) {
         sentimentBoost = this.fearGreed.toSignalModifier(this.lastFearGreedScore, signal.side);
       }
 
-      // Hurst confidence — scale down signals in random-walk regime
+      // Hurst confidence scaling
       const hurstConfidence = regime.hurstExponent > 0.55 || regime.hurstExponent < 0.45
-        ? 1.0   // Strong signal in trending or ranging
-        : 0.75; // Reduce confidence when H ≈ 0.5 (random walk)
+        ? 1.0
+        : 0.75;
+
+      // ── ML Signal Adjustment (Problem 1 Fix, active component) ──────────
+      // ML online + agrees with signal → +0.15 boost
+      // ML online + disagrees with signal → skip trade
+      let mlBoost = 0;
+      if (ml?.online && !ml.sitOut) {
+        const mlSide = ml.prediction === "UP" ? "buy" : "sell";
+        if (mlSide === signal.side) {
+          mlBoost = ml.strongSignal ? 0.20 : 0.10;
+        } else {
+          // ML disagrees — suppress this signal
+          return { ...signal, confidence: 0 };
+        }
+      }
 
       return {
         ...signal,
         confidence: Math.min(
           0.99,
-          Math.max(0.1, signal.confidence * strategyWeight * hurstConfidence + regimeBoost + sentimentBoost)
+          Math.max(0.1, signal.confidence * strategyWeight * hurstConfidence + regimeBoost + sentimentBoost + mlBoost)
         ),
       };
     });
 
+    // Filter: must exceed 0.5 confidence gate
     const filteredSignals = weightedSignals.filter((s) => s.confidence > 0.5);
     filteredSignals.sort((a, b) => b.confidence - a.confidence);
-
-    // Sentiment label based on cached score (set by refreshSentiment in engine)
-    const sentimentLabel = this.lastFearGreedScore <= 25 ? "Extreme Fear" 
-      : this.lastFearGreedScore <= 45 ? "Fear"
-      : this.lastFearGreedScore <= 55 ? "Neutral"
-      : this.lastFearGreedScore <= 75 ? "Greed"
-      : "Extreme Greed";
 
     return {
       signals: filteredSignals,
       regime,
       allocations,
       sentiment: useSentiment
-        ? { score: this.lastFearGreedScore, label: sentimentLabel }
+        ? { score: this.lastFearGreedScore, label: this._sentimentLabel() }
         : undefined,
+      mlPrediction: ml ?? undefined,
     };
+  }
+
+  private _sentimentLabel(): string {
+    return this.lastFearGreedScore <= 25 ? "Extreme Fear"
+      : this.lastFearGreedScore <= 45 ? "Fear"
+      : this.lastFearGreedScore <= 55 ? "Neutral"
+      : this.lastFearGreedScore <= 75 ? "Greed"
+      : "Extreme Greed";
   }
 }

@@ -1,0 +1,17 @@
+{
+  "timestamp": "2026-04-29T22:32:39.499866",
+  "model": "random_forest",
+  "label": "direction",
+  "metrics": {
+    "accuracy": 0.457514450867052,
+    "precision": 0.46057619408642914,
+    "recall": 0.7279808268424206,
+    "f1": 0.564197817506385
+  },
+  "cv_results": {
+    "mean": 0,
+    "std": 0,
+    "scores": []
+  },
+  "model_path": "/Users/admin/Desktop/TradingBot/data-pipeline/models/random_forest_direction.pkl"
+}
